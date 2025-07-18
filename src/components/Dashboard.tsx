@@ -3,6 +3,7 @@ import VideoFeedGrid from './VideoFeedGrid';
 import SensorDashboard from './SensorDashboard';
 import ControlInterface from './ControlInterface';
 import SystemStatus from './SystemStatus';
+import LidarVisualization from './LidarVisualization';
 import webSocketService from '../services/websocket';
 import { SensorData, SystemStatus as SystemStatusType, VehicleControl } from '../types';
 
@@ -12,7 +13,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
   const [sensorData, setSensorData] = useState<SensorData | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatusType | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [selectedView, setSelectedView] = useState<'overview' | 'video' | 'sensors' | 'control'>('overview');
+  const [selectedView, setSelectedView] = useState<'overview' | 'video' | 'sensors'>('overview');
 
   useEffect(() => {
     // Setup WebSocket event handlers
@@ -69,12 +70,6 @@ const Dashboard: React.FC<DashboardProps> = () => {
         >
           Sensors
         </button>
-        <button 
-          className={selectedView === 'control' ? 'active' : ''}
-          onClick={() => setSelectedView('control')}
-        >
-          Control
-        </button>
       </nav>
 
       <main className="dashboard-main">
@@ -86,10 +81,13 @@ const Dashboard: React.FC<DashboardProps> = () => {
             <div className="control-section">
               <ControlInterface onControlChange={handleControlInput} />
             </div>
-            <div className="sensor-section">
-              <SensorDashboard data={sensorData} />
+            <div className="lidar-section">
+              <div className="lidar-visualization">
+                <h3>LiDAR</h3>
+                <LidarVisualization data={sensorData} size={180} />
+              </div>
             </div>
-            <div className="status-section">
+            <div className="system-section">
               <SystemStatus 
                 status={systemStatus} 
                 onSystemCommand={handleSystemCommand}
@@ -109,13 +107,39 @@ const Dashboard: React.FC<DashboardProps> = () => {
             <SensorDashboard data={sensorData} expanded />
           </div>
         )}
-
-        {selectedView === 'control' && (
-          <div className="control-layout">
-            <ControlInterface onControlChange={handleControlInput} expanded />
-          </div>
-        )}
       </main>
+
+      {selectedView === 'overview' && (
+        <div className="dashboard-bottom-strip">
+          <div className="battery-strip">
+            <span className="strip-label">Battery:</span>
+            <span className="strip-value">{sensorData?.battery?.percentage?.toFixed(1) || '85.0'}%</span>
+            <div className="mini-battery-bar">
+              <div 
+                className="mini-battery-fill" 
+                style={{ width: `${sensorData?.battery?.percentage || 85}%` }}
+              />
+            </div>
+            <span className="strip-detail">{sensorData?.battery?.voltage?.toFixed(1) || '12.4'}V</span>
+          </div>
+          <div className="temperature-strip">
+            <span className="strip-label">Temp:</span>
+            <span className="strip-value">{sensorData?.temperature?.toFixed(1) || '28.5'}°C</span>
+            <span className="strip-status">
+              {(sensorData?.temperature || 28.5) > 35 ? '🔥' : (sensorData?.temperature || 28.5) < 10 ? '🧊' : '✅'}
+            </span>
+          </div>
+          <div className="connection-strip">
+            <span className="strip-label">Connection:</span>
+            <span className={`strip-value ${isConnected ? 'connected' : 'disconnected'}`}>
+              {isConnected ? '🟢 Online' : '🔴 Offline'}
+            </span>
+            {systemStatus && (
+              <span className="strip-detail">{systemStatus.latency}ms</span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

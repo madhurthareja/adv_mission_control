@@ -88,7 +88,7 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({ data, expanded = fals
       <div className="sensor-grid">
         {expanded && (
           <div className="sensor-card lidar-card">
-            <LidarVisualization data={displayData} size={280} />
+            <LidarVisualization data={displayData} size={200} />
           </div>
         )}
         
