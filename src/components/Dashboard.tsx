@@ -14,6 +14,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatusType | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [selectedView, setSelectedView] = useState<'overview' | 'video' | 'sensors'>('overview');
+  const [currentDirection, setCurrentDirection] = useState<string>('stop');
 
   useEffect(() => {
     // Setup WebSocket event handlers
@@ -28,6 +29,20 @@ const Dashboard: React.FC<DashboardProps> = () => {
   }, []);
 
   const handleControlInput = (control: VehicleControl) => {
+    // Determine direction based on control input
+    let direction = 'stop';
+    
+    if (control.forward > 20) {
+      direction = 'forward';
+    } else if (control.forward < -20) {
+      direction = 'backward';
+    } else if (control.turn > 20) {
+      direction = 'right';
+    } else if (control.turn < -20) {
+      direction = 'left';
+    }
+    
+    setCurrentDirection(direction);
     webSocketService.sendControl(control);
   };
 
@@ -76,7 +91,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
         {selectedView === 'overview' && (
           <div className="overview-layout">
             <div className="video-section">
-              <VideoFeedGrid />
+              <VideoFeedGrid currentDirection={currentDirection} />
             </div>
             <div className="control-section">
               <ControlInterface onControlChange={handleControlInput} />
@@ -98,7 +113,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
 
         {selectedView === 'video' && (
           <div className="video-layout">
-            <VideoFeedGrid fullscreen />
+            <VideoFeedGrid fullscreen currentDirection={currentDirection} />
           </div>
         )}
 
@@ -117,7 +132,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
             <div className="mini-battery-bar">
               <div 
                 className="mini-battery-fill" 
-                style={{ width: `${sensorData?.battery?.percentage || 85}%` }}
+                data-percentage={sensorData?.battery?.percentage || 85}
               />
             </div>
             <span className="strip-detail">{sensorData?.battery?.voltage?.toFixed(1) || '12.4'}V</span>

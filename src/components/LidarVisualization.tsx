@@ -184,7 +184,7 @@ const LidarVisualization: React.FC<LidarVisualizationProps> = ({ data, size = 30
   return (
     <div className="lidar-visualization">
       <div className="lidar-header">
-        <h3>LIDAR Visualization</h3>
+        {/* <h3>LIDAR Visualization</h3> */}
         <div className="lidar-stats">
           <span className="stat">
             Distance: <strong>{currentDistance.toFixed(0)}cm</strong>
