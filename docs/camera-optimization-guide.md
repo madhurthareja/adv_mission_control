@@ -11,8 +11,7 @@ Your Mission Control dashboard now includes an intelligent camera management sys
 - **Directional Cameras** - Activate based on joystick movement
 - **Resource Saving** - Inactive cameras use low FPS (5fps vs 15fps)
 
-**2. MacBook Camera for All 4 Feeds**
-- **Single Source** - Uses your MacBook camera for all views
+**2. Camera for All 4 Feeds**
 - **Virtual Angles** - CSS transforms simulate different camera positions:
   - `Front` - Normal view
   - `Back` - Rotated 180° and flipped

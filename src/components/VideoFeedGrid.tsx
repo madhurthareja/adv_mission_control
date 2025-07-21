@@ -229,7 +229,7 @@ const VideoFeedGrid: React.FC<VideoFeedGridProps> = ({ fullscreen = false, curre
       }
     });
     
-    // Start keep-alive mechanism for Safari
+    // Start keep-alive mechanism 
     if (webcamStream && !keepAliveInterval.current) {
       keepAliveInterval.current = window.setInterval(() => {
         // Check if camera tracks are still active
@@ -324,11 +324,11 @@ const VideoFeedGrid: React.FC<VideoFeedGridProps> = ({ fullscreen = false, curre
       case 'front':
         return 'scaleX(1)'; // Normal front view
       case 'back':
-        return 'scaleX(-1) rotate(180deg)'; // Flip and rotate for rear view
+        return 'scaleX(1)'; // Flip and rotate for rear view
       case 'left':
-        return 'rotate(-90deg)'; // Rotate left
+        return 'scaleX(1)'; // Rotate left
       case 'right':
-        return 'rotate(90deg)'; // Rotate right
+        return 'scaleX(1)'; // Rotate right
       default:
         return 'scaleX(1)';
     }
