@@ -23,10 +23,11 @@ logger = logging.getLogger(__name__)
 class CameraManager:
     def __init__(self):
         self.cameras = {
-            'front': {'device': '/dev/video0', 'stream': None, 'active': False},
-            'back': {'device': '/dev/video2', 'stream': None, 'active': False},
-            'left': {'device': '/dev/video4', 'stream': None, 'active': False},
-            'right': {'device': '/dev/video6', 'stream': None, 'active': False}
+            # Pi cameras use libcamera (camera 0 and 1), USB cameras use V4L2 devices
+            'front': {'camera_id': 0, 'stream': None, 'active': False, 'port': 8082},  # raspi v3 (libcamera)
+            'back': {'camera_id': 1, 'stream': None, 'active': False, 'port': 8081},   # raspi v2 (libcamera)
+            'left': {'device': '/dev/video18', 'stream': None, 'active': False, 'port': 8084},    # usb C270
+            'right': {'device': '/dev/video16', 'stream': None, 'active': False, 'port': 8083},   # usb C270
         }
         self.streaming_processes = {}
     
@@ -36,55 +37,136 @@ class CameraManager:
         available_cameras = []
         
         try:
-            # List video devices
+            # Detect Pi cameras using libcamera
+            logger.info("Checking for Pi cameras...")
+            result = subprocess.run(['libcamera-hello', '--list-cameras'], 
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and "Available cameras" in result.stdout:
+                logger.info(f"Pi cameras detected: {result.stdout}")
+                # Parse camera output to determine which cameras are available
+                if "0 :" in result.stdout:
+                    available_cameras.append('front')
+                    logger.info("✅ Front Pi camera (camera 0) detected")
+                if "1 :" in result.stdout:
+                    available_cameras.append('back')
+                    logger.info("✅ Back Pi camera (camera 1) detected")
+            else:
+                logger.warning("No Pi cameras detected via libcamera")
+            
+            # Detect USB cameras using V4L2
+            logger.info("Checking for USB cameras...")
             result = subprocess.run(['v4l2-ctl', '--list-devices'], 
                                   capture_output=True, text=True)
-            logger.info(f"Available cameras: {result.stdout}")
+            logger.info(f"V4L2 devices: {result.stdout}")
             
-            # Test each camera
-            for camera_name, camera_info in self.cameras.items():
-                device = camera_info['device']
-                try:
-                    cap = cv2.VideoCapture(device)
-                    if cap.isOpened():
-                        available_cameras.append(camera_name)
-                        logger.info(f"✅ {camera_name} camera detected at {device}")
-                    else:
-                        logger.warning(f"❌ {camera_name} camera not found at {device}")
-                    cap.release()
-                except Exception as e:
-                    logger.error(f"Error testing {camera_name}: {e}")
+            # Test USB cameras
+            for camera_name in ['left', 'right']:
+                if 'device' in self.cameras[camera_name]:
+                    device = self.cameras[camera_name]['device']
+                    try:
+                        cap = cv2.VideoCapture(device)
+                        if cap.isOpened():
+                            available_cameras.append(camera_name)
+                            logger.info(f"✅ {camera_name} USB camera detected at {device}")
+                        else:
+                            logger.warning(f"❌ {camera_name} USB camera not found at {device}")
+                        cap.release()
+                    except Exception as e:
+                        logger.error(f"Error testing {camera_name}: {e}")
                     
         except Exception as e:
             logger.error(f"Error detecting cameras: {e}")
         
         return available_cameras
     
-    def start_camera_stream(self, camera_name: str, stream_url: str):
-        """Start streaming for a specific camera"""
+    def start_camera_stream(self, camera_name: str, stream_url: str = ""):
+        """Start streaming for a specific camera using appropriate method for Pi vs USB cameras"""
         if camera_name not in self.cameras:
             logger.error(f"Unknown camera: {camera_name}")
             return False
         
-        device = self.cameras[camera_name]['device']
+        camera_info = self.cameras[camera_name]
+        port = camera_info['port']
         
-        # FFmpeg command for streaming
-        cmd = [
-            'ffmpeg',
-            '-f', 'v4l2',
-            '-i', device,
-            '-f', 'mjpeg',
-            '-r', '30',
-            '-s', '640x480',
-            '-q:v', '5',
-            stream_url
-        ]
+        # Determine if this is a Raspberry Pi camera or USB camera
+        is_pi_camera = camera_name in ['front', 'back']
+        
+        if is_pi_camera:
+            # Use rpicam-vid for Raspberry Pi cameras (proper RPi 5 approach)
+            camera_id = camera_info['camera_id']
+            
+            # Use rpicam-vid with MJPEG for HTTP streaming (RPi 5 compatible)
+            cmd = [
+                'rpicam-vid',
+                '--camera', str(camera_id),
+                '-t', '0',
+                '--width', '640',
+                '--height', '480',
+                '--framerate', '15',
+                '--codec', 'mjpeg',
+                '--inline',
+                '--nopreview',
+                '--listen',
+                '-o', f'tcp://0.0.0.0:{port}?listen=1'
+            ]
+        else:
+            # Use OpenCV for USB cameras  
+            device = camera_info['device']
+            cmd = [
+                'python3', '-c', f'''
+import cv2
+import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class StreamHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/stream":
+            cap = cv2.VideoCapture("{device}", cv2.CAP_V4L2)
+            if not cap.isOpened():
+                self.send_response(404)
+                self.end_headers()
+                return
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if ret:
+                        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        frame_bytes = buffer.tobytes()
+                        
+                        self.wfile.write(b"--frame\\r\\n")
+                        self.send_header("Content-Type", "image/jpeg")
+                        self.send_header("Content-Length", str(len(frame_bytes)))
+                        self.end_headers()
+                        self.wfile.write(frame_bytes)
+                        self.wfile.write(b"\\r\\n")
+                    time.sleep(1/15)
+            except:
+                pass
+            finally:
+                cap.release()
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass
+
+HTTPServer(("0.0.0.0", {port}), StreamHandler).serve_forever()
+'''
+            ]
         
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.streaming_processes[camera_name] = process
             self.cameras[camera_name]['active'] = True
-            logger.info(f"✅ Started streaming {camera_name} camera")
+            camera_type = "Pi camera" if is_pi_camera else "USB camera"
+            logger.info(f"✅ Started streaming {camera_name} {camera_type} on port {port}")
             return True
         except Exception as e:
             logger.error(f"Failed to start {camera_name} stream: {e}")
@@ -202,7 +284,7 @@ class MissionControlPi:
         
         # WebSocket connection to backend
         self.sio = socketio.AsyncClient()
-        self.backend_url = "http://YOUR_BACKEND_SERVER:3001"  # Update this
+        self.backend_url = "http://localhost:3001"  # Update this
         
         self.setup_websocket_handlers()
         self.running = False
@@ -252,7 +334,7 @@ class MissionControlPi:
         if self.camera_manager.cameras[stream_name]['active']:
             self.camera_manager.stop_camera_stream(stream_name)
         else:
-            stream_url = f"udp://YOUR_BACKEND_SERVER:808{['front', 'back', 'left', 'right'].index(stream_name)}"
+            stream_url = f"udp://localhost:808{['front', 'back', 'left', 'right'].index(stream_name)}"
             self.camera_manager.start_camera_stream(stream_name, stream_url)
     
     async def send_system_status(self):
@@ -287,6 +369,11 @@ class MissionControlPi:
         # Detect cameras
         available_cameras = self.camera_manager.detect_cameras()
         logger.info(f"Available cameras: {available_cameras}")
+        
+        # Start camera streams for available cameras
+        for camera_name in available_cameras:
+            self.camera_manager.start_camera_stream(camera_name)
+            await asyncio.sleep(2)  # Give each camera time to initialize
         
         # Connect to backend
         try:

@@ -3,6 +3,8 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import { WebSocketMessage, VehicleControl, SensorData, SystemStatus } from './types';
 import { HardwareController } from './hardware/controller';
 import { CommandQueue } from './services/commandQueue';
@@ -12,15 +14,76 @@ dotenv.config();
 
 const app = express();
 const server = createServer(app);
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:"],
+    },
+  },
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+});
+app.use('/api/', limiter);
+
+// CORS configuration for internet access
+const corsOptions = {
+  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    // Allow requests with no origin (mobile apps, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Allow localhost for development
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return callback(null, true);
+    }
+    
+    // Allow configured frontend URLs
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Reject other origins
+    callback(new Error('Not allowed by CORS'), false);
+  },
+  credentials: true,
+  methods: ["GET", "POST"],
+};
+
+app.use(cors(corsOptions));
+
 const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST"]
-  }
+  cors: corsOptions
 });
 
+// Simple authentication middleware
+const authenticate = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const apiKey = req.headers['x-api-key'] || req.query.apiKey;
+  const validApiKey = process.env.API_KEY;
+  
+  if (!validApiKey) {
+    // If no API key is set, allow access (development mode)
+    return next();
+  }
+  
+  if (apiKey !== validApiKey) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid API key' });
+  }
+  
+  next();
+};
+
 // Middleware
-app.use(cors());
 app.use(express.json());
 
 // Services
@@ -29,12 +92,16 @@ const commandQueue = new CommandQueue();
 const dataLogger = new DataLogger();
 
 // API Routes
-app.get('/api/status', (req, res) => {
+app.get('/api/status', authenticate, (req, res) => {
   res.json({
     status: 'online',
     timestamp: new Date().toISOString(),
     connections: io.engine.clientsCount,
-    hardware: hardwareController.getStatus()
+    hardware: hardwareController.getStatus(),
+    serverInfo: {
+      environment: process.env.NODE_ENV || 'development',
+      version: process.env.npm_package_version || '1.0.0'
+    }
   });
 });
 
@@ -44,6 +111,39 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     timestamp: new Date().toISOString()
+  });
+});
+
+// Public endpoint to check if server is running
+app.get('/api/ping', (req, res) => {
+  res.json({
+    status: 'alive',
+    timestamp: new Date().toISOString(),
+    message: 'Mission Control Server is running'
+  });
+});
+
+// Network information endpoint (authenticated)
+app.get('/api/network', authenticate, (req, res) => {
+  const networkInterfaces = require('os').networkInterfaces();
+  const addresses = [];
+  
+  for (const name of Object.keys(networkInterfaces)) {
+    for (const net of networkInterfaces[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        addresses.push({
+          name,
+          address: net.address,
+          netmask: net.netmask
+        });
+      }
+    }
+  }
+  
+  res.json({
+    interfaces: addresses,
+    port: process.env.PORT || 3001,
+    publicUrl: process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3001}`
   });
 });
 
@@ -165,8 +265,23 @@ process.on('SIGTERM', () => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`Mission Control Server running on port ${PORT}`);
-  console.log(`Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:3000"}`);
+const PORT = parseInt(process.env.PORT || '3001');
+const HOST = process.env.HOST || '0.0.0.0'; // Bind to all interfaces for internet access
+
+server.listen(PORT, HOST, () => {
+  console.log(`🚀 Mission Control Server running on ${HOST}:${PORT}`);
+  console.log(`🌐 Internet access: ${process.env.PUBLIC_URL || 'Not configured'}`);
+  console.log(`🔐 API Key required: ${process.env.API_KEY ? 'Yes' : 'No (Development mode)'}`);
+  console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:3000"}`);
+  
+  // Log network interfaces
+  const networkInterfaces = require('os').networkInterfaces();
+  console.log('📡 Available network interfaces:');
+  for (const name of Object.keys(networkInterfaces)) {
+    for (const net of networkInterfaces[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        console.log(`   ${name}: http://${net.address}:${PORT}`);
+      }
+    }
+  }
 });
