@@ -12,7 +12,6 @@ VITE_FRONT_CAMERA_URL = https://001c49625cd6.ngrok-free.app/api/camera/front/str
 VITE_BACK_CAMERA_URL = https://001c49625cd6.ngrok-free.app/api/camera/back/stream
 VITE_LEFT_CAMERA_URL = https://001c49625cd6.ngrok-free.app/api/camera/left/stream
 VITE_RIGHT_CAMERA_URL = https://001c49625cd6.ngrok-free.app/api/camera/right/stream
-VITE_API_KEY = dev-mission-control-key
 ```
 
 ## ✅ After setting these variables:

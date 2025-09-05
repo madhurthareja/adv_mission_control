@@ -45,6 +45,16 @@ const VideoFeedGrid: React.FC<VideoFeedGridProps> = ({ fullscreen = false, curre
   const [activeCameras, setActiveCameras] = useState<Set<string>>(new Set(['front']));
   const [selectedFeed, setSelectedFeed] = useState<string | null>(null);
 
+  // Debug: Log environment variables
+  useEffect(() => {
+    console.log('🔍 Camera URLs from environment:');
+    console.log('Front:', import.meta.env.VITE_FRONT_CAMERA_URL);
+    console.log('Back:', import.meta.env.VITE_BACK_CAMERA_URL);
+    console.log('Left:', import.meta.env.VITE_LEFT_CAMERA_URL);
+    console.log('Right:', import.meta.env.VITE_RIGHT_CAMERA_URL);
+    console.log('Backend:', import.meta.env.VITE_BACKEND_URL);
+  }, []);
+
   // Smart camera activation based on movement direction
   useEffect(() => {
     let newActiveCameras = new Set<string>();
@@ -110,11 +120,15 @@ const VideoFeedGrid: React.FC<VideoFeedGridProps> = ({ fullscreen = false, curre
                 filter: isActive ? 'none' : 'grayscale(50%)'
               }}
               onError={(e) => {
-                console.error(`Failed to load ${feed.name} stream:`, e);
-                // Optionally update feed status to inactive
+                console.error(`❌ Failed to load ${feed.name} stream:`, e);
+                console.error(`URL attempted: ${feed.url}`);
+                // Test the URL directly
+                fetch(feed.url, { method: 'HEAD' })
+                  .then(response => console.log(`${feed.name} HEAD request:`, response.status, response.statusText))
+                  .catch(err => console.error(`${feed.name} fetch error:`, err));
               }}
               onLoad={() => {
-                console.log(`${feed.name} stream loaded successfully`);
+                console.log(`✅ ${feed.name} stream loaded successfully from: ${feed.url}`);
               }}
             />
           ) : (
