@@ -26,8 +26,8 @@ class CameraManager:
             # Pi cameras use libcamera (camera 0 and 1), USB cameras use V4L2 devices
             'front': {'camera_id': 0, 'stream': None, 'active': False, 'port': 8082},  # raspi v3 (libcamera)
             'back': {'camera_id': 1, 'stream': None, 'active': False, 'port': 8081},   # raspi v2 (libcamera)
-            'left': {'device': '/dev/video18', 'stream': None, 'active': False, 'port': 8084},    # usb C270
-            'right': {'device': '/dev/video16', 'stream': None, 'active': False, 'port': 8083},   # usb C270
+            'left': {'device': '/dev/video7', 'stream': None, 'active': False, 'port': 8084},    # usb C270
+            'right': {'device': '/dev/video18', 'stream': None, 'active': False, 'port': 8083},   # usb C270
         }
         self.streaming_processes = {}
     
@@ -37,9 +37,9 @@ class CameraManager:
         available_cameras = []
         
         try:
-            # Detect Pi cameras using libcamera
+            # Detect Pi cameras using rpicam tools
             logger.info("Checking for Pi cameras...")
-            result = subprocess.run(['libcamera-hello', '--list-cameras'], 
+            result = subprocess.run(['rpicam-hello', '--list-cameras'], 
                                   capture_output=True, text=True, timeout=10)
             if result.returncode == 0 and "Available cameras" in result.stdout:
                 logger.info(f"Pi cameras detected: {result.stdout}")
@@ -92,22 +92,59 @@ class CameraManager:
         is_pi_camera = camera_name in ['front', 'back']
         
         if is_pi_camera:
-            # Use rpicam-vid for Raspberry Pi cameras (proper RPi 5 approach)
+            # Use rpicam-vid for Raspberry Pi cameras with HTTP streaming
             camera_id = camera_info['camera_id']
             
-            # Use rpicam-vid with MJPEG for HTTP streaming (RPi 5 compatible)
+            # Create a simple HTTP server that serves MJPEG from rpicam-vid
             cmd = [
-                'rpicam-vid',
-                '--camera', str(camera_id),
-                '-t', '0',
-                '--width', '640',
-                '--height', '480',
-                '--framerate', '15',
-                '--codec', 'mjpeg',
-                '--inline',
-                '--nopreview',
-                '--listen',
-                '-o', f'tcp://0.0.0.0:{port}?listen=1'
+                'python3', '-c', f'''
+import subprocess
+import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+
+class CameraStreamHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/stream":
+            # Start rpicam-vid process
+            rpicam_process = subprocess.Popen([
+                "rpicam-vid",
+                "--camera", "{camera_id}",
+                "-t", "0",
+                "--width", "640",
+                "--height", "480",
+                "--framerate", "15",
+                "--codec", "mjpeg",
+                "--inline",
+                "--nopreview",
+                "-o", "-"
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            
+            try:
+                while True:
+                    chunk = rpicam_process.stdout.read(4096)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except:
+                pass
+            finally:
+                rpicam_process.terminate()
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass
+
+HTTPServer(("0.0.0.0", {port}), CameraStreamHandler).serve_forever()
+'''
             ]
         else:
             # Use OpenCV for USB cameras  
@@ -284,7 +321,7 @@ class MissionControlPi:
         
         # WebSocket connection to backend
         self.sio = socketio.AsyncClient()
-        self.backend_url = "http://localhost:3001"  # Update this
+        self.backend_url = "https://001c49625cd6.ngrok-free.app"  # Use ngrok URL for Vercel deployment
         
         self.setup_websocket_handlers()
         self.running = False

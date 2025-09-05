@@ -147,6 +147,136 @@ app.get('/api/network', authenticate, (req, res) => {
   });
 });
 
+// Camera stream routes - Direct access instead of proxy
+// These connect directly to camera streams and forward the data
+
+app.get('/api/camera/front/stream', (req, res) => {
+  console.log('Direct request to front camera stream - using IPv4');
+  
+  // Set headers for MJPEG stream
+  res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=frame');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // Forward request to camera server
+  const http = require('http');
+  const options = {
+    hostname: '127.0.0.1',  // Use IPv4 explicitly - FIXED
+    port: 8082,  // Front camera: Pi camera 0
+    path: '/stream',
+    method: 'GET'
+  };
+  
+  console.log('Connecting to camera server:', options);
+  
+  const proxyReq = http.request(options, (proxyRes: any) => {
+    // Forward headers
+    Object.keys(proxyRes.headers).forEach(key => {
+      res.setHeader(key, proxyRes.headers[key]);
+    });
+    
+    // Forward response
+    proxyRes.pipe(res);
+  });
+  
+  proxyReq.on('error', (err: any) => {
+    console.error('Front camera error:', err);
+    res.status(503).json({ error: 'Front camera unavailable' });
+  });
+  
+  proxyReq.end();
+});
+
+app.get('/api/camera/back/stream', (req, res) => {
+  console.log('Direct request to back camera stream');
+  
+  res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=frame');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  const http = require('http');
+  const options = {
+    hostname: '127.0.0.1',  // Use IPv4 explicitly
+    port: 8081,  // Back camera: Pi camera 1
+    path: '/stream',
+    method: 'GET'
+  };
+  
+  const proxyReq = http.request(options, (proxyRes: any) => {
+    Object.keys(proxyRes.headers).forEach(key => {
+      res.setHeader(key, proxyRes.headers[key]);
+    });
+    proxyRes.pipe(res);
+  });
+  
+  proxyReq.on('error', (err: any) => {
+    console.error('Back camera error:', err);
+    res.status(503).json({ error: 'Back camera unavailable' });
+  });
+  
+  proxyReq.end();
+});
+
+app.get('/api/camera/left/stream', (req, res) => {
+  console.log('Direct request to left camera stream');
+  
+  res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=frame');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  const http = require('http');
+  const options = {
+    hostname: '127.0.0.1',  // Use IPv4 explicitly
+    port: 8084,
+    path: '/stream',
+    method: 'GET'
+  };
+  
+  const proxyReq = http.request(options, (proxyRes: any) => {
+    Object.keys(proxyRes.headers).forEach(key => {
+      res.setHeader(key, proxyRes.headers[key]);
+    });
+    proxyRes.pipe(res);
+  });
+  
+  proxyReq.on('error', (err: any) => {
+    console.error('Left camera error:', err);
+    res.status(503).json({ error: 'Left camera unavailable' });
+  });
+  
+  proxyReq.end();
+});
+
+app.get('/api/camera/right/stream', (req, res) => {
+  console.log('Direct request to right camera stream');
+  
+  res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=frame');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  const http = require('http');
+  const options = {
+    hostname: '127.0.0.1',  // Use IPv4 explicitly
+    port: 8083,
+    path: '/stream',
+    method: 'GET'
+  };
+  
+  const proxyReq = http.request(options, (proxyRes: any) => {
+    Object.keys(proxyRes.headers).forEach(key => {
+      res.setHeader(key, proxyRes.headers[key]);
+    });
+    proxyRes.pipe(res);
+  });
+  
+  proxyReq.on('error', (err: any) => {
+    console.error('Right camera error:', err);
+    res.status(503).json({ error: 'Right camera unavailable' });
+  });
+  
+  proxyReq.end();
+});
+
 // WebSocket connection handling
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
