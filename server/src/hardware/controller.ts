@@ -1,10 +1,12 @@
 import { VehicleControl, SensorData, SystemStatus, HardwareStatus } from '../types';
+import http from 'http';
 
 export class HardwareController {
   private systemStatus: SystemStatus;
   private hardwareStatus: HardwareStatus;
   private sensorData: SensorData;
   private isEmergencyStop: boolean = false;
+  private mpuSensorData: any = null;
 
   constructor() {
     this.systemStatus = {
@@ -49,7 +51,7 @@ export class HardwareController {
 
     this.sensorData = {
       lidar: {
-        distance: 0,
+        distance: 0,  // Will be updated by real sensor data
         angle: 0,
         obstacles: [],
       },
@@ -57,16 +59,119 @@ export class HardwareController {
         acceleration: { x: 0, y: 0, z: 9.8 },
         gyroscope: { x: 0, y: 0, z: 0 },
         magnetometer: { x: 0, y: 0, z: 0 },
+        // MPU6050 specific fields that will be populated by real data
+        roll: 0,
+        pitch: 0,
+        temperature: 25,  // Default until real MPU data arrives
+        jerk: 0,
       },
       battery: {
         voltage: 12.0,
         current: 0,
         percentage: 100,
       },
-      temperature: 25,
+      temperature: 25, // Will be updated by MPU temperature - this should always match imu.temperature
     };
 
     this.initializeHardware();
+    this.startMPUSensorMonitoring();
+  }
+
+  private startMPUSensorMonitoring() {
+    // Start periodic MPU data fetching
+    console.log('Starting MPU sensor monitoring...');
+    
+    const fetchMPUData = () => {
+      const options = {
+        hostname: '172.20.10.4',
+        port: 8087,
+        path: '/api/data',
+        method: 'GET',
+        timeout: 1000, // 1 second timeout
+      };
+
+      const req = http.request(options, (res) => {
+        let data = '';
+        
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        
+        res.on('end', () => {
+          try {
+            const mpuResponse = JSON.parse(data);
+            
+            if (mpuResponse.success && mpuResponse.data) {
+              this.processMPUData(mpuResponse.data, mpuResponse.metadata);
+            } else {
+              console.log('MPU API returned error:', mpuResponse.error);
+            }
+          } catch (error) {
+            console.error('Error parsing MPU data:', error);
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        // Don't spam the console with connection errors
+        if (Date.now() % 10000 < 100) { // Log every 10 seconds
+          console.log('MPU sensor unavailable (will keep trying...)');
+        }
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+      });
+
+      req.end();
+    };
+
+    // Fetch MPU data every 100ms (10Hz)
+    setInterval(fetchMPUData, 100);
+    
+    // Initial fetch
+    fetchMPUData();
+  }
+
+  private processMPUData(mpuData: any, metadata: any) {
+    try {
+      // Update our internal MPU sensor data
+      this.mpuSensorData = mpuData;
+      
+      // Update sensor data with real MPU readings
+      this.sensorData.imu = {
+        acceleration: {
+          x: mpuData.acceleration.x,
+          y: mpuData.acceleration.y,
+          z: mpuData.acceleration.z,
+        },
+        gyroscope: {
+          x: mpuData.gyroscope.x,
+          y: mpuData.gyroscope.y,
+          z: mpuData.gyroscope.z,
+        },
+        magnetometer: this.sensorData.imu.magnetometer, // Keep existing magnetometer data
+        roll: mpuData.orientation.roll,
+        pitch: mpuData.orientation.pitch,
+        temperature: mpuData.temperature,
+        jerk: mpuData.jerk,
+      };
+      
+      // Update system temperature to match MPU temperature
+      this.sensorData.temperature = mpuData.temperature;
+      this.hardwareStatus.pi.temperature = mpuData.temperature;
+      
+      // Mark IMU sensor as connected
+      this.hardwareStatus.sensors.imu = true;
+      
+      // Log real data occasionally
+      if (Date.now() % 1000 < 100) { // Every second
+        console.log(`✅ MPU6050 Live Data - Roll: ${mpuData.orientation.roll.toFixed(1)}° Pitch: ${mpuData.orientation.pitch.toFixed(1)}° Temp: ${mpuData.temperature.toFixed(1)}°C [${metadata.data_source}]`);
+      }
+      
+    } catch (error) {
+      console.error('Error processing MPU data:', error);
+    }
   }
 
   private initializeHardware() {
@@ -87,54 +192,67 @@ export class HardwareController {
   }
 
   private startSensorDataSimulation() {
+    // This interval now only handles system status updates
+    // Real sensor data comes through updateSensorData() method
     setInterval(() => {
       if (this.isEmergencyStop) return;
 
-      // Simulate sensor data
-      this.sensorData = {
-        lidar: {
-          distance: 100 + Math.random() * 200,
-          angle: Math.random() * 360,
-          obstacles: Array.from({ length: Math.floor(Math.random() * 3) }, () => ({
-            x: (Math.random() - 0.5) * 200,
-            y: (Math.random() - 0.5) * 200,
-          })),
-        },
-        imu: {
-          acceleration: {
-            x: (Math.random() - 0.5) * 2,
-            y: (Math.random() - 0.5) * 2,
-            z: 9.8 + (Math.random() - 0.5) * 0.5,
-          },
-          gyroscope: {
-            x: (Math.random() - 0.5) * 10,
-            y: (Math.random() - 0.5) * 10,
-            z: (Math.random() - 0.5) * 10,
-          },
-          magnetometer: {
-            x: (Math.random() - 0.5) * 100,
-            y: (Math.random() - 0.5) * 100,
-            z: (Math.random() - 0.5) * 100,
-          },
-        },
-        battery: {
-          voltage: 12.0 + Math.random() * 2,
-          current: Math.random() * 5,
-          percentage: Math.max(0, this.sensorData.battery.percentage - Math.random() * 0.01),
-        },
-        temperature: 25 + Math.random() * 10,
-      };
-
-      // Update hardware status
+      // Only update system metrics, NOT sensor data
+      // Real sensor data is preserved and comes from Pi controller
+      
+      // Update hardware status (these are Pi system metrics, not sensor data)
       this.hardwareStatus.pi.cpuUsage = Math.random() * 100;
       this.hardwareStatus.pi.memoryUsage = Math.random() * 100;
-      this.hardwareStatus.pi.temperature = 40 + Math.random() * 20;
+      // Use MPU temperature for Pi temperature instead of random values
+      this.hardwareStatus.pi.temperature = this.sensorData.imu?.temperature || this.sensorData.temperature || 25;
       this.hardwareStatus.esp32.batteryVoltage = this.sensorData.battery.voltage;
       this.hardwareStatus.esp32.signalStrength = -40 - Math.random() * 30;
 
       // Update system status
       this.systemStatus.latency = 20 + Math.random() * 30;
     }, 100);
+  }
+
+  updateSensorData(incomingSensorData: any) {
+    // Update sensor data with real data from Pi controller
+    if (incomingSensorData) {
+      console.log('Raw incoming sensor data:', JSON.stringify(incomingSensorData, null, 2));
+      
+      // Extract MPU temperature if available
+      const mpuTemperature = incomingSensorData.imu?.temperature;
+      
+      // Completely replace sensor data with incoming real data
+      // Only keep existing values for sensors that aren't being updated
+      this.sensorData = {
+        lidar: incomingSensorData.lidar || this.sensorData.lidar,
+        imu: incomingSensorData.imu || this.sensorData.imu,
+        battery: incomingSensorData.battery || this.sensorData.battery,
+        // ALWAYS use MPU temperature as the primary temperature source
+        temperature: mpuTemperature || this.sensorData.temperature,
+      };
+      
+      // Update sensor status based on incoming data
+      if (incomingSensorData.imu) {
+        this.hardwareStatus.sensors.imu = true;
+        const imu = incomingSensorData.imu;
+        console.log(`🔄 Real MPU Data - Roll: ${imu.roll?.toFixed(1)}° Pitch: ${imu.pitch?.toFixed(1)}° Temp: ${imu.temperature?.toFixed(1)}°C Jerk: ${imu.jerk}`);
+        
+        // Update Pi hardware temperature to match MPU temperature
+        if (imu.temperature !== undefined) {
+          this.hardwareStatus.pi.temperature = imu.temperature;
+          console.log(`🌡️ Updated all temperatures to MPU reading: ${imu.temperature.toFixed(1)}°C`);
+        }
+      }
+      
+      if (incomingSensorData.lidar) {
+        this.hardwareStatus.sensors.lidar = true;
+        console.log(`🔄 Real LIDAR Data - Distance: ${incomingSensorData.lidar.distance?.toFixed(1)}cm Angle: ${incomingSensorData.lidar.angle?.toFixed(1)}°`);
+      }
+      
+      if (incomingSensorData.battery) {
+        console.log(`🔄 Real Battery Data - Voltage: ${incomingSensorData.battery.voltage?.toFixed(1)}V Percentage: ${incomingSensorData.battery.percentage?.toFixed(1)}%`);
+      }
+    }
   }
 
   sendVehicleControl(control: VehicleControl) {

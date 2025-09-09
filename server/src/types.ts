@@ -17,6 +17,10 @@ export interface SensorData {
     acceleration: {x: number, y: number, z: number};
     gyroscope: {x: number, y: number, z: number};
     magnetometer: {x: number, y: number, z: number};
+    roll?: number;
+    pitch?: number;
+    jerk?: number;
+    temperature?: number;
   };
   battery: {
     voltage: number;
@@ -48,7 +52,7 @@ export interface CommandPacket {
 }
 
 export interface WebSocketMessage {
-  type: 'control' | 'sensor' | 'status' | 'video' | 'command';
+  type: 'control' | 'sensor' | 'sensor_data' | 'status' | 'video' | 'command';
   data: any;
   timestamp: number;
 }

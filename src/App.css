@@ -701,6 +701,121 @@ body {
   font-size: 0.9rem;
 }
 
+/* MPU6050 Orientation Styles */
+.mpu-orientation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+  width: 100%;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.orientation-value {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  border: 1px solid #333;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.orientation-value .label {
+  font-weight: bold;
+  color: #ccc;
+  min-width: 50px;
+}
+
+.orientation-value .value {
+  font-weight: bold;
+  color: #00ff88;
+  font-family: 'Courier New', monospace;
+}
+
+.jerk-indicator {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  border: 1px solid #333;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.jerk-indicator .label {
+  font-weight: bold;
+  color: #ccc;
+  min-width: 50px;
+}
+
+.jerk-status {
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+.jerk-status.active {
+  color: #ff6b6b;
+  animation: pulse 1s infinite;
+}
+
+.jerk-status.inactive {
+  color: #51cf66;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+/* Data Source Indicator */
+.data-source-indicator {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+}
+
+.real-data {
+  color: #51cf66;
+  font-weight: bold;
+  background: rgba(81, 207, 102, 0.1);
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  border: 1px solid #51cf66;
+  font-size: 0.9rem;
+}
+
+.partial-data {
+  color: #ffa726;
+  font-weight: bold;
+  background: rgba(255, 167, 38, 0.1);
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  border: 1px solid #ffa726;
+  font-size: 0.9rem;
+}
+
+.mock-data {
+  color: #ffd43b;
+  font-weight: bold;
+  background: rgba(255, 212, 59, 0.1);
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  border: 1px solid #ffd43b;
+  font-size: 0.9rem;
+}
+
 .temperature-info {
   text-align: center;
   display: flex;
