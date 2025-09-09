@@ -17,7 +17,7 @@ class WebSocketService {
   }
 
   private connect() {
-    const serverUrl = (import.meta as any).env?.VITE_WEBSOCKET_URL || 'http://localhost:3001';
+    const serverUrl = (import.meta as any).env?.VITE_WEBSOCKET_URL || 'http://172.20.10.4:3001';
     
     this.socket = io(serverUrl, {
       autoConnect: true,
@@ -56,6 +56,15 @@ class WebSocketService {
 
     // Handle incoming sensor data
     this.socket.on('sensor_data', (data: SensorData) => {
+      console.log('📡 Received sensor data:', data);
+      if (data.imu && typeof data.imu.roll === 'number') {
+        console.log('✅ Real MPU data received:', {
+          roll: data.imu.roll,
+          pitch: data.imu.pitch,
+          temp: data.imu.temperature,
+          jerk: data.imu.jerk
+        });
+      }
       this.onSensorData?.(data);
     });
 

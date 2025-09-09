@@ -150,6 +150,32 @@ app.get('/api/network', authenticate, (req, res) => {
 // Camera stream routes - Direct access instead of proxy
 // These connect directly to camera streams and forward the data
 
+// MPU sensor data endpoint
+app.get('/api/mpu/data', authenticate, (req, res) => {
+  console.log('MPU sensor data request');
+  
+  const http = require('http');
+  const options = {
+    hostname: '172.20.10.4',  // Local MPU API server
+    port: 8087,
+    path: '/api/data',
+    method: 'GET'
+  };
+  
+  const proxyReq = http.request(options, (proxyRes: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    proxyRes.pipe(res);
+  });
+  
+  proxyReq.on('error', (err: any) => {
+    console.error('MPU sensor error:', err);
+    res.status(503).json({ error: 'MPU sensor unavailable' });
+  });
+  
+  proxyReq.end();
+});
+
 app.get('/api/camera/front/stream', (req, res) => {
   console.log('Direct request to front camera stream - using IPv4');
   
@@ -158,12 +184,12 @@ app.get('/api/camera/front/stream', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Access-Control-Allow-Origin', '*');
   
-  // Forward request to camera server
+  // Forward request to smart camera manager
   const http = require('http');
   const options = {
-    hostname: '127.0.0.1',  // Use IPv4 explicitly - FIXED
-    port: 8082,  // Front camera: Pi camera 0
-    path: '/stream',
+    hostname: '172.20.10.4',
+    port: 8080,  // Smart camera manager
+    path: '/front',
     method: 'GET'
   };
   
@@ -196,9 +222,9 @@ app.get('/api/camera/back/stream', (req, res) => {
   
   const http = require('http');
   const options = {
-    hostname: '127.0.0.1',  // Use IPv4 explicitly
-    port: 8081,  // Back camera: Pi camera 1
-    path: '/stream',
+    hostname: '172.20.10.4',
+    port: 8080,  // Smart camera manager
+    path: '/back',
     method: 'GET'
   };
   
@@ -226,9 +252,9 @@ app.get('/api/camera/left/stream', (req, res) => {
   
   const http = require('http');
   const options = {
-    hostname: '127.0.0.1',  // Use IPv4 explicitly
-    port: 8084,
-    path: '/stream',
+    hostname: '172.20.10.4',
+    port: 8080,  // Smart camera manager
+    path: '/right',
     method: 'GET'
   };
   
@@ -256,9 +282,9 @@ app.get('/api/camera/right/stream', (req, res) => {
   
   const http = require('http');
   const options = {
-    hostname: '127.0.0.1',  // Use IPv4 explicitly
-    port: 8083,
-    path: '/stream',
+    hostname: '172.20.10.4',
+    port: 8080,  // Smart camera manager
+    path: '/left',
     method: 'GET'
   };
   
@@ -308,6 +334,14 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Handle sensor data from Pi controller
+  socket.on('sensor_data', (message: WebSocketMessage) => {
+    if (message.type === 'sensor_data') {
+      // Update hardware controller with real sensor data
+      hardwareController.updateSensorData(message.data);
+    }
+  });
+
   // Handle system commands
   socket.on('system_command', (message: WebSocketMessage) => {
     console.log('Received system command:', message);

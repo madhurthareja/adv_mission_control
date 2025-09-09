@@ -15,10 +15,126 @@ import socketio
 import serial
 import cv2
 import numpy as np
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import sys
+import os
+
+# Add the mpu directory to the path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'mpu'))
+
+# Try to import MPU6050 reader
+try:
+    from mpu6050_reader import MPU6050Reader
+    MPU_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"MPU6050 module not available: {e}")
+    MPU_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+class MPUSensorManager:
+    """Class to manage MPU6050 sensor for mission control - Direct integration"""
+    
+    def __init__(self):
+        self.mpu_reader = None
+        self.is_running = False
+        self.latest_data = None
+        self.data_lock = threading.Lock()
+        
+    def initialize(self):
+        """Initialize the MPU sensor"""
+        if not MPU_AVAILABLE:
+            logger.error("❌ MPU6050 library not available")
+            return False
+            
+        try:
+            self.mpu_reader = MPU6050Reader()
+            self.mpu_reader.setup()
+            logger.info("✅ MPU sensor manager initialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error initializing MPU sensor: {e}")
+            return False
+    
+    def start_data_collection(self):
+        """Start collecting sensor data in a background thread"""
+        if not self.mpu_reader:
+            logger.error("MPU sensor not available for data collection")
+            return False
+            
+        self.is_running = True
+        data_thread = threading.Thread(target=self._data_collection_loop, daemon=True)
+        data_thread.start()
+        logger.info("📊 MPU data collection started")
+        return True
+    
+    def _data_collection_loop(self):
+        """Background thread for collecting sensor data"""
+        while self.is_running:
+            try:
+                if self.mpu_reader:
+                    raw_data = self.mpu_reader.read_sensor_data()
+                    if raw_data:
+                        # Format data for mission control system
+                        formatted_data = {
+                            'imu': {
+                                'acceleration': {
+                                    'x': raw_data['ax'],
+                                    'y': raw_data['ay'],
+                                    'z': raw_data['az']
+                                },
+                                'gyroscope': {
+                                    'x': raw_data['gx'],
+                                    'y': raw_data['gy'],
+                                    'z': raw_data['gz']
+                                },
+                                'magnetometer': {'x': 0, 'y': 0, 'z': 0},  # MPU6050 doesn't have magnetometer
+                                'roll': raw_data['roll'],
+                                'pitch': raw_data['pitch'],
+                                'jerk': raw_data['jerk'],
+                                'temperature': raw_data['temp']
+                            },
+                            'timestamp': time.time()
+                        }
+                        
+                        with self.data_lock:
+                            self.latest_data = formatted_data
+                            
+                        # Print the data in a readable format
+                        logger.info(f"MPU Data - Roll: {raw_data['roll']:.1f}° "
+                                  f"Pitch: {raw_data['pitch']:.1f}° "
+                                  f"Temp: {raw_data['temp']:.1f}°C "
+                                  f"Jerk: {raw_data['jerk']}")
+                        
+                time.sleep(0.5)  # 2Hz update rate
+            except Exception as e:
+                logger.error(f"Error in MPU data collection: {e}")
+                time.sleep(1)
+    
+    def get_latest_data(self):
+        """Get the latest sensor data"""
+        with self.data_lock:
+            return self.latest_data.copy() if self.latest_data else None
+    
+    def stop(self):
+        """Stop the MPU sensor manager"""
+        self.is_running = False
+        logger.info("🛑 MPU sensor manager stopped")
+    
+    def stop(self):
+        """Stop the MPU sensor manager"""
+        self.is_running = False
+        if self.http_server:
+            self.http_server.shutdown()
+        logger.info("🛑 MPU sensor manager stopped")
+    
+    def test_connection(self):
+        """Test MPU sensor connection"""
+        if self.mpu_reader:
+            return self.mpu_reader.test_connection()
+        return False
 
 class CameraManager:
     def __init__(self):
@@ -318,13 +434,31 @@ class MissionControlPi:
         self.camera_manager = CameraManager()
         self.sensor_manager = SensorManager()
         self.esp32_controller = ESP32Controller()
+        self.mpu_sensor_manager = MPUSensorManager()
         
         # WebSocket connection to backend
         self.sio = socketio.AsyncClient()
-        self.backend_url = "https://001c49625cd6.ngrok-free.app"  # Use ngrok URL for Vercel deployment
+        self.backend_url = "http://172.20.10.4:3001"  # Use local backend server
         
         self.setup_websocket_handlers()
         self.running = False
+    
+    async def initialize(self):
+        """Initialize all components"""
+        logger.info("🎯 Initializing Mission Control Pi...")
+        
+        # Initialize MPU sensor
+        if self.mpu_sensor_manager.initialize():
+            logger.info("✅ MPU sensor initialized")
+            self.mpu_sensor_manager.start_data_collection()
+        else:
+            logger.warning("⚠️ MPU sensor not available")
+        
+        # Detect cameras
+        available_cameras = self.camera_manager.detect_cameras()
+        logger.info(f"Available cameras: {available_cameras}")
+        
+        logger.info("🚀 Mission Control Pi initialization complete")
     
     def setup_websocket_handlers(self):
         """Setup WebSocket event handlers"""
@@ -392,6 +526,12 @@ class MissionControlPi:
     async def send_sensor_data(self):
         """Send sensor data to backend"""
         sensor_data = self.sensor_manager.read_sensors()
+        
+        # Add MPU sensor data if available
+        mpu_data = self.mpu_sensor_manager.get_latest_data()
+        if mpu_data and mpu_data.get('imu'):
+            sensor_data['imu'] = mpu_data['imu']
+        
         message = {
             'type': 'sensor_data',
             'data': sensor_data,
@@ -431,6 +571,9 @@ class MissionControlPi:
         logger.info("🛑 Stopping Mission Control Pi Controller...")
         self.running = False
         
+        # Stop MPU sensor manager
+        self.mpu_sensor_manager.stop()
+        
         # Stop all camera streams
         for camera_name in self.camera_manager.cameras:
             self.camera_manager.stop_camera_stream(camera_name)
@@ -443,6 +586,7 @@ async def main():
     pi_controller = MissionControlPi()
     
     try:
+        await pi_controller.initialize()
         await pi_controller.start()
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")

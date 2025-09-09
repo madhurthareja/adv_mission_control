@@ -17,13 +17,18 @@ export interface SensorData {
     acceleration: {x: number, y: number, z: number};
     gyroscope: {x: number, y: number, z: number};
     magnetometer: {x: number, y: number, z: number};
+    // MPU6050 enriched fields (required for real data)
+    roll: number;        // Roll angle in degrees
+    pitch: number;       // Pitch angle in degrees
+    jerk: number;        // Jerk detection (0 or 1)
+    temperature: number; // MPU temperature in Celsius
   };
   battery: {
     voltage: number;
     current: number;
     percentage: number;
   };
-  temperature: number;
+  temperature: number; // System temperature (should match imu.temperature)
 }
 
 export interface SystemStatus {

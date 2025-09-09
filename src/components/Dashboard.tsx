@@ -18,7 +18,10 @@ const Dashboard: React.FC<DashboardProps> = () => {
 
   useEffect(() => {
     // Setup WebSocket event handlers
-    webSocketService.onSensorDataReceived(setSensorData);
+    webSocketService.onSensorDataReceived((data) => {
+      console.log('🎯 Dashboard received sensor data:', data);
+      setSensorData(data);
+    });
     webSocketService.onSystemStatusReceived(setSystemStatus);
     webSocketService.onConnectionChanged(setIsConnected);
 

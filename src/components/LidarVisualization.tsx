@@ -17,7 +17,7 @@ const LidarVisualization: React.FC<LidarVisualizationProps> = ({ data, size = 30
   const [lidarPoints, setLidarPoints] = useState<LidarPoint[]>([]);
   const [scanAngle, setScanAngle] = useState(0);
 
-  // Generate mock LIDAR data for demonstration
+  // Generate mock LIDAR data only when no real data exists
   const generateMockLidarData = (): LidarPoint[] => {
     const points: LidarPoint[] = [];
     const numPoints = 360; // 360 degree scan
@@ -48,9 +48,16 @@ const LidarVisualization: React.FC<LidarVisualizationProps> = ({ data, size = 30
   useEffect(() => {
     // Update LIDAR data
     if (data?.lidar) {
-      // Use real data if available, otherwise generate mock data
-      const mockData = generateMockLidarData();
-      setLidarPoints(mockData);
+      const { distance, angle } = data.lidar;
+      // Create a single real measurement point set around current reading
+      const points: LidarPoint[] = [];
+      const spread = 2; // small spread around the angle for visualization
+      for (let i = -spread; i <= spread; i++) {
+        const a = (angle + i + 360) % 360;
+        const d = Math.max(0, distance + (i === 0 ? 0 : (i * 2)));
+        points.push({ distance: d, angle: a, intensity: 255 });
+      }
+      setLidarPoints(points);
     } else {
       // Generate mock data for demonstration
       const mockData = generateMockLidarData();
