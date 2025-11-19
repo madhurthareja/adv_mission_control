@@ -2,7 +2,6 @@
 """
 Simple camera test script without WebSocket - just start the cameras
 """
-
 import asyncio
 import json
 import logging
@@ -12,56 +11,67 @@ import threading
 from typing import Dict, List, Optional
 import cv2
 import numpy as np
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 class CameraManager:
     def __init__(self):
         self.cameras = {
-            'front': {'camera_id': 0, 'stream': None, 'active': False, 'port': 8082},  # raspi v3
-            'back': {'camera_id': 1, 'stream': None, 'active': False, 'port': 8081},   # raspi v2
-            'left': {'device': '/dev/video7', 'stream': None, 'active': False, 'port': 8084},    # usb C270
-            'right': {'device': '/dev/video18', 'stream': None, 'active': False, 'port': 8083},   # usb C270
+            'front': {'camera_id': 0, 'stream': None, 'active': False, 'port': 8082},
+            'back': {'camera_id': 1, 'stream': None, 'active': False, 'port': 8081},
+            'left': {'device': None, 'stream': None, 'active': False, 'port': 8084},
+            'right': {'device': None, 'stream': None, 'active': False, 'port': 8083},
         }
         self.streaming_processes = {}
-    
+        self.usb_camera_names = ['left', 'right']
     def detect_cameras(self):
         """Detect available cameras"""
         logger.info("Detecting cameras...")
         available_cameras = []
         
         try:
-            # Detect Pi cameras using rpicam tools
-            logger.info("Checking for Pi cameras...")
-            result = subprocess.run(['rpicam-hello', '--list-cameras'], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode == 0 and "Available cameras" in result.stdout:
-                logger.info(f"Pi cameras detected: {result.stdout}")
-                if "0 :" in result.stdout:
-                    available_cameras.append('front')
-                    logger.info("✅ Front Pi camera (camera 0) detected")
-                if "1 :" in result.stdout:
-                    available_cameras.append('back')
-                    logger.info("✅ Back Pi camera (camera 1) detected")
+            # Detect all cameras using v4l2-ctl
+            logger.info("Detecting all cameras with v4l2-ctl...")
+            result = subprocess.run(['v4l2-ctl', '--list-devices'],
+                                  capture_output=True, text=True)
             
-            # Detect USB cameras using V4L2
-            logger.info("Checking for USB cameras...")
-            for camera_name in ['left', 'right']:
-                if 'device' in self.cameras[camera_name]:
-                    device = self.cameras[camera_name]['device']
-                    try:
-                        cap = cv2.VideoCapture(device)
-                        if cap.isOpened():
-                            available_cameras.append(camera_name)
-                            logger.info(f"✅ {camera_name} USB camera detected at {device}")
-                        else:
-                            logger.warning(f"❌ {camera_name} USB camera not found at {device}")
-                        cap.release()
-                    except Exception as e:
-                        logger.error(f"Error testing {camera_name}: {e}")
+            if result.returncode == 0:
+                logger.info(f"v4l2-ctl output:\n{result.stdout}")
+
+                # Use a more robust parsing method
+                import re
+                devices = re.split(r'\n\n', result.stdout.strip())
+
+                pi_camera_indices = [0, 1]  # front, back
+                usb_camera_names = ['left', 'right']
+
+                pi_cam_idx = 0
+                usb_cam_idx = 0
+
+                for device_info in devices:
+                    # Check for CSI (Pi cameras) vs USB
+                    is_pi_camera = "platform: rpicam" in device_info or "bcm2835-csi" in device_info
+                    is_usb_camera = "usb" in device_info
                     
+                    device_path_match = re.search(r'/dev/video\d+', device_info)
+                    if device_path_match:
+                        device_path = device_path_match.group(0)
+
+                        if is_pi_camera and pi_cam_idx < len(pi_camera_indices):
+                            camera_name = ['front', 'back'][pi_cam_idx]
+                            self.cameras[camera_name]['device'] = device_path
+                            available_cameras.append(camera_name)
+                            logger.info(f"✅ Pi camera '{camera_name}' detected at {device_path}")
+                            pi_cam_idx += 1
+
+                        elif is_usb_camera and usb_cam_idx < len(usb_camera_names):
+                            camera_name = usb_camera_names[usb_cam_idx]
+                            self.cameras[camera_name]['device'] = device_path
+                            available_cameras.append(camera_name)
+                            logger.info(f"✅ USB camera '{camera_name}' detected at {device_path}")
+                            usb_cam_idx += 1
+            else:
+                logger.error("Failed to list devices with v4l2-ctl")
         except Exception as e:
             logger.error(f"Error detecting cameras: {e}")
         
@@ -90,7 +100,6 @@ import subprocess
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
-
 class CameraStreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/stream":
@@ -130,7 +139,6 @@ class CameraStreamHandler(BaseHTTPRequestHandler):
     
     def log_message(self, format, *args):
         pass
-
 print(f"Starting Pi camera {camera_id} server on port {port}")
 HTTPServer(("0.0.0.0", {port}), CameraStreamHandler).serve_forever()
 '''
@@ -143,7 +151,6 @@ HTTPServer(("0.0.0.0", {port}), CameraStreamHandler).serve_forever()
 import cv2
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
-
 class StreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/stream":
@@ -182,7 +189,6 @@ class StreamHandler(BaseHTTPRequestHandler):
     
     def log_message(self, format, *args):
         pass
-
 print(f"Starting USB camera server on port {port}")
 HTTPServer(("0.0.0.0", {port}), StreamHandler).serve_forever()
 '''
@@ -198,7 +204,6 @@ HTTPServer(("0.0.0.0", {port}), StreamHandler).serve_forever()
         except Exception as e:
             logger.error(f"Failed to start {camera_name} stream: {e}")
             return False
-
 def main():
     logger.info("🚀 Starting Camera Test...")
     
@@ -226,6 +231,5 @@ def main():
             process.terminate()
             process.wait()
         logger.info("✅ All cameras stopped!")
-
 if __name__ == "__main__":
     main()
